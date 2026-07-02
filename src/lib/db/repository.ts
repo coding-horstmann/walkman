@@ -175,6 +175,12 @@ type DbListingLink = {
 };
 
 const ACTIVE_REPAIR_SOURCE_RC_SQL = "rc.source_platform IS DISTINCT FROM 'leboncoin'";
+const TOP_DEAL_FRESHNESS_DAYS = 7;
+const DASHBOARD_LISTING_FRESHNESS_DAYS = 14;
+
+function freshListingSql(alias: string, days: number): string {
+  return `${alias}.last_seen >= NOW() - INTERVAL '${days} days'`;
+}
 
 function modelTitleMatchSql(titleColumn: string, modelAlias: string): string {
   const modelCode = `NULLIF(${modelAlias}.model_code, '')`;
@@ -558,6 +564,7 @@ export async function getMedianActiveMarketPrice(modelIdValue: string): Promise<
      JOIN walkman_models wm ON wm.id = ml.model_id
      WHERE ml.model_id = $1
        AND ml.price_amount IS NOT NULL
+       AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
        AND ${relevantMarketListingSql("ml.title", "ml.condition")}
        AND ${modelTitleMatchSql("ml.title", "wm")}`,
     [modelIdValue]
@@ -584,24 +591,28 @@ export async function getDashboardDataFromDb(): Promise<DashboardData> {
          FROM market_listings ml
          JOIN walkman_models wm ON wm.id = ml.model_id
          WHERE ml.price_amount IS NOT NULL
+           AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
            AND ${relevantMarketListingSql("ml.title", "ml.condition")}
            AND ${modelTitleMatchSql("ml.title", "wm")})::text AS valued_model_count,
         (SELECT COUNT(*) FROM market_sales)::text AS sales_count,
         (SELECT COUNT(*)
          FROM market_listings ml
          JOIN walkman_models wm ON wm.id = ml.model_id
-         WHERE ${relevantMarketListingSql("ml.title", "ml.condition")}
+         WHERE ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
+           AND ${relevantMarketListingSql("ml.title", "ml.condition")}
            AND ${modelTitleMatchSql("ml.title", "wm")})::text AS market_listing_count,
         (SELECT COUNT(DISTINCT ml.model_id)
          FROM market_listings ml
          JOIN walkman_models wm ON wm.id = ml.model_id
          WHERE ml.price_amount IS NOT NULL
+           AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
            AND ${relevantMarketListingSql("ml.title", "ml.condition")}
            AND ${modelTitleMatchSql("ml.title", "wm")})::text AS market_valued_model_count,
         (SELECT COUNT(*)
          FROM repair_candidates rc
          JOIN walkman_models wm ON wm.id = rc.model_id
          WHERE ${relevantTitleSql("rc.title")}
+           AND ${freshListingSql("rc", DASHBOARD_LISTING_FRESHNESS_DAYS)}
            AND ${ACTIVE_REPAIR_SOURCE_RC_SQL}
            AND ${modelTitleMatchSql("rc.title", "wm")})::text AS candidate_count,
         (SELECT COUNT(*)
@@ -609,6 +620,7 @@ export async function getDashboardDataFromDb(): Promise<DashboardData> {
          JOIN walkman_models wm ON wm.id = rc.model_id
          WHERE rc.label = 'hot'
            AND ${relevantTitleSql("rc.title")}
+           AND ${freshListingSql("rc", DASHBOARD_LISTING_FRESHNESS_DAYS)}
            AND ${ACTIVE_REPAIR_SOURCE_RC_SQL}
            AND ${modelTitleMatchSql("rc.title", "wm")})::text AS hot_candidate_count,
         (SELECT MAX(started_at) FROM scan_runs WHERE run_type = 'catalog') AS last_catalog_run,
@@ -680,6 +692,7 @@ export async function listModelMarketSummaries(limit?: number): Promise<ModelMar
        FROM market_listings ml
        JOIN walkman_models wm ON wm.id = ml.model_id
        WHERE ml.price_amount IS NOT NULL
+         AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
          AND ${relevantMarketListingSql("ml.title", "ml.condition")}
          AND ${modelTitleMatchSql("ml.title", "wm")}
        GROUP BY ml.model_id
@@ -712,6 +725,7 @@ export async function listModelMarketSummaries(limit?: number): Promise<ModelMar
        FROM repair_candidates rc
        JOIN walkman_models wm ON wm.id = rc.model_id
        WHERE ${relevantTitleSql("rc.title")}
+         AND ${freshListingSql("rc", DASHBOARD_LISTING_FRESHNESS_DAYS)}
          AND ${ACTIVE_REPAIR_SOURCE_RC_SQL}
          AND ${modelTitleMatchSql("rc.title", "wm")}
        GROUP BY rc.model_id
@@ -827,6 +841,7 @@ export async function listTopRepairCandidates(limit = 50): Promise<DashboardData
        FROM market_listings ml
        JOIN walkman_models wm ON wm.id = ml.model_id
        WHERE ml.price_amount IS NOT NULL
+         AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
          AND ${relevantMarketListingSql("ml.title", "ml.condition")}
          AND ${modelTitleMatchSql("ml.title", "wm")}
        GROUP BY ml.model_id
@@ -844,6 +859,7 @@ export async function listTopRepairCandidates(limit = 50): Promise<DashboardData
      LEFT JOIN sold_medians ON sold_medians.model_id = rc.model_id
      LEFT JOIN active_medians ON active_medians.model_id = rc.model_id
      WHERE ${relevantTitleSql("rc.title")}
+       AND ${freshListingSql("rc", TOP_DEAL_FRESHNESS_DAYS)}
        AND ${ACTIVE_REPAIR_SOURCE_RC_SQL}
        AND ${modelTitleMatchSql("rc.title", "wm")}
      ORDER BY rc.score DESC, rc.expected_margin DESC NULLS LAST, rc.last_seen DESC
@@ -1168,6 +1184,7 @@ async function listMarketLinksForModels(modelIds: string[], limitPerModel: numbe
        FROM market_listings ml
        JOIN walkman_models wm ON wm.id = ml.model_id
        WHERE ml.model_id = ANY($1::text[])
+         AND ${freshListingSql("ml", DASHBOARD_LISTING_FRESHNESS_DAYS)}
          AND (${relevantMarketListingSql("ml.title", "ml.condition")} OR ml.source_platform = 'walkman_land')
          AND ${modelTitleMatchSql("ml.title", "wm")}
      )
@@ -1206,6 +1223,7 @@ async function listCandidateLinksForModels(modelIds: string[], limitPerModel: nu
        JOIN walkman_models wm ON wm.id = rc.model_id
        WHERE rc.model_id = ANY($1::text[])
          AND ${relevantTitleSql("rc.title")}
+         AND ${freshListingSql("rc", DASHBOARD_LISTING_FRESHNESS_DAYS)}
          AND ${ACTIVE_REPAIR_SOURCE_RC_SQL}
          AND ${modelTitleMatchSql("rc.title", "wm")}
      )
