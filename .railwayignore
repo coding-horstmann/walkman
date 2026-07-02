@@ -1,0 +1,11 @@
+node_modules
+.next
+.vercel
+.railway
+.railway-config-pull-*
+data
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env*
+*.tsbuildinfo
