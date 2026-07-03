@@ -477,7 +477,15 @@ function CandidateRow({
               {candidate.issueTerms.slice(0, 3).map((term) => (
                 <span key={term} className="rounded bg-background px-1.5 py-0.5">{term}</span>
               ))}
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              <a
+                className="inline-flex items-center gap-1 rounded bg-background px-1.5 py-0.5 text-accent-strong hover:text-accent"
+                href={ebaySoldResearchUrlForKeywords(candidate.title)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                eBay verkauft
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              </a>
             </div>
           </div>
         </div>
@@ -682,17 +690,27 @@ function LinkChips({
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       {links.length ? links.map((link) => (
-        <a
-          key={link.itemUrl}
-          className="max-w-full truncate rounded bg-background px-2 py-1 text-[11px] font-medium text-accent-strong hover:text-accent"
-          href={link.itemUrl}
-          target="_blank"
-          rel="noreferrer"
-          title={link.title}
-        >
-          {formatMoney(link.priceAmount)} - {sourceName(link.sourcePlatform)}
-          {showCondition ? ` - ${conditionName(link.conditionBucket)}` : ""}
-        </a>
+        <span key={link.itemUrl} className="inline-flex max-w-full flex-wrap gap-1">
+          <a
+            className="max-w-full truncate rounded bg-background px-2 py-1 text-[11px] font-medium text-accent-strong hover:text-accent"
+            href={link.itemUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={link.title}
+          >
+            {formatMoney(link.priceAmount)} - {sourceName(link.sourcePlatform)}
+            {showCondition ? ` - ${conditionName(link.conditionBucket)}` : ""}
+          </a>
+          <a
+            className="rounded border border-line bg-background px-2 py-1 text-[11px] font-medium text-foreground/60 hover:text-accent"
+            href={ebaySoldResearchUrlForKeywords(link.title)}
+            target="_blank"
+            rel="noreferrer"
+            title={`Verkaufte eBay-Daten fuer ${link.title}`}
+          >
+            eBay verkauft
+          </a>
+        </span>
       )) : fallbackLinks?.length ? fallbackLinks.map((link) => (
         <a
           key={link.href}
@@ -849,6 +867,19 @@ function ebaySearchUrlForQuery(query: string): string {
   const url = new URL("https://www.ebay.de/sch/i.html");
   url.searchParams.set("_nkw", query);
   url.searchParams.set("_sop", "10");
+  return url.toString();
+}
+
+function ebaySoldResearchUrlForKeywords(keywords: string): string {
+  const url = new URL("https://www.ebay.de/sh/research");
+  url.searchParams.set("marketplace", "EBAY-DE");
+  url.searchParams.set("keywords", keywords);
+  url.searchParams.set("dayRange", "1095");
+  url.searchParams.set("categoryId", "0");
+  url.searchParams.set("tabName", "SOLD");
+  url.searchParams.set("tz", "Europe/Berlin");
+  url.searchParams.set("limit", "50");
+  url.searchParams.set("offset", "0");
   return url.toString();
 }
 

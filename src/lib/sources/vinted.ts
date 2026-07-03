@@ -86,7 +86,9 @@ export class VintedSearchClient {
   }
 
   private mapApiItem(item: VintedApiItem): EbayListingBase | null {
-    const itemUrl = item.url ? absoluteUrl(item.url, this.origin) : item.id ? new URL(`/items/${item.id}`, this.origin).toString() : "";
+    const itemUrl = item.url
+      ? normalizeVintedItemUrl(item.url, this.origin)
+      : item.id ? normalizeVintedItemUrl(`/items/${item.id}`, this.origin) : "";
     if (!itemUrl) return null;
     const price = readPrice(item.price) || readPrice(item.total_item_price);
 
@@ -116,7 +118,7 @@ export class VintedSearchClient {
       if (listings.length >= limit) return false;
       const href = $(element).attr("href");
       if (!href) return;
-      const itemUrl = absoluteUrl(href, this.origin);
+      const itemUrl = normalizeVintedItemUrl(href, this.origin);
       if (seen.has(itemUrl)) return;
       seen.add(itemUrl);
 
@@ -259,10 +261,7 @@ function readPrice(value: VintedApiItem["price"]): { amount?: number; currency?:
 
 function readNumber(value?: string | number): number | undefined {
   if (value === undefined || value === null) return undefined;
-  const raw = String(value).trim();
-  const normalized = raw.includes(",")
-    ? raw.replace(/\./g, "").replace(",", ".")
-    : raw;
+  const normalized = normalizePriceNumber(String(value));
   const numberValue = Number(normalized);
   return Number.isFinite(numberValue) ? numberValue : undefined;
 }
@@ -273,10 +272,43 @@ function conditionFromText(text: string): string | undefined {
   return conditions.find((condition) => normalized.includes(normalizeText(condition)));
 }
 
+export function parseVintedPriceText(text: string): number | undefined {
+  const match = text.match(/(\d{1,3}(?:(?:[.\s\u00A0\u202F]\d{3})+)(?:[,.]\d{1,2})?|\d{1,7}(?:[,.]\d{1,2})?)\s*(?:€|â‚¬|EUR)/i);
+  if (!match) return undefined;
+  return readNumber(match[1]);
+}
+
 function parseEuro(text: string): number | undefined {
+  const robustPrice = parseVintedPriceText(text);
+  if (robustPrice !== undefined) return robustPrice;
+
   const match = text.match(/(\d{1,5}(?:[.,]\d{1,2})?)\s*(?:€|EUR)/i);
   if (!match) return undefined;
   return readNumber(match[1]);
+}
+
+function normalizePriceNumber(value: string): string {
+  const compact = value.trim().replace(/[\s\u00A0\u202F]/g, "");
+  const lastComma = compact.lastIndexOf(",");
+  const lastDot = compact.lastIndexOf(".");
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    return lastComma > lastDot
+      ? compact.replace(/\./g, "").replace(",", ".")
+      : compact.replace(/,/g, "");
+  }
+
+  if (lastComma >= 0) return compact.replace(/\./g, "").replace(",", ".");
+
+  if (lastDot >= 0) {
+    const parts = compact.split(".");
+    const fraction = parts.at(-1) || "";
+    if (parts.length > 2 || (parts.length === 2 && parts[0].length <= 3 && fraction.length === 3)) {
+      return compact.replace(/\./g, "");
+    }
+  }
+
+  return compact;
 }
 
 function cleanTitle(value: string): string {
@@ -301,6 +333,15 @@ function normalizeText(value: string): string {
 
 function absoluteUrl(href: string, origin: string): string {
   return href.startsWith("http") ? href : new URL(href, origin).toString();
+}
+
+export function normalizeVintedItemUrl(href: string, origin: string): string {
+  const url = new URL(absoluteUrl(href, origin));
+  if (url.pathname.startsWith("/items/")) {
+    url.search = "";
+    url.hash = "";
+  }
+  return url.toString();
 }
 
 function isAuthError(error: unknown): boolean {

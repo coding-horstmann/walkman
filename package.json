@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:price-parser": "tsx scripts/vinted-price-parser-test.ts",
     "typecheck": "tsc --noEmit",
     "catalog": "tsx scripts/catalog-sync.ts",
     "catalog:prod": "tsx scripts/catalog-sync.ts --persist",
