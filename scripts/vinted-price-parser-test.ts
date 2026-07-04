@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { normalizeVintedItemUrl, parseVintedPriceText } from "@/lib/sources/vinted";
+import { isVintedBlockError, normalizeVintedItemUrl, parseVintedPriceText } from "@/lib/sources/vinted";
 
 const cases: Array<[string, number]> = [
   ["1 150,00 \u20AC", 1150],
@@ -23,4 +23,9 @@ assert.equal(
   "https://www.vinted.fr/items/8790873468-walkman-sony-tps-l2"
 );
 
-console.log(`vinted parser ok (${cases.length} price cases + url normalization)`);
+assert.equal(isVintedBlockError("Vinted HTTP 403"), true);
+assert.equal(isVintedBlockError("Vinted HTTP 429"), true);
+assert.equal(isVintedBlockError("vinted_fr stopped after repeated block signals"), true);
+assert.equal(isVintedBlockError("Vinted HTTP 500"), false);
+
+console.log(`vinted parser ok (${cases.length} price cases + url normalization + block detection)`);

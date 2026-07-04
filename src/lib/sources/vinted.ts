@@ -50,12 +50,24 @@ export class VintedSearchClient {
     const limit = options.limit || Number(process.env[`${this.envPrefix}_RESULTS_PER_MODEL`] || process.env.VINTED_RESULTS_PER_MODEL || 8);
     const timeoutMs = options.timeoutMs || Number(process.env[`${this.envPrefix}_TIMEOUT_MS`] || process.env.VINTED_TIMEOUT_MS || 25_000);
 
-    const apiResults = await this.searchApi(query, limit, timeoutMs).catch(async (error) => {
-      if (!isAuthError(error)) return [];
-      await this.fetchText(new URL("/", this.origin), timeoutMs);
-      return this.searchApi(query, limit, timeoutMs);
-    }).catch(() => []);
-    if (apiResults.length) return apiResults;
+    try {
+      const apiResults = await this.searchApi(query, limit, timeoutMs);
+      if (apiResults.length) return apiResults;
+    } catch (error) {
+      if (isAuthError(error) || isVintedBlockError(error)) {
+        await this.warmUpSession(timeoutMs);
+        try {
+          const retryResults = await this.searchApi(query, limit, timeoutMs);
+          if (retryResults.length) return retryResults;
+          return [];
+        } catch (retryError) {
+          if (isAuthError(retryError) || isVintedBlockError(retryError)) throw retryError;
+        }
+      } else {
+        return this.searchHtml(query, limit, timeoutMs);
+      }
+    }
+
     return this.searchHtml(query, limit, timeoutMs);
   }
 
@@ -83,6 +95,11 @@ export class VintedSearchClient {
     const html = await this.fetchText(url, timeoutMs);
     if (isBlocked(html)) throw new Error("Vinted block/captcha detected");
     return this.extractVintedListings(html, limit);
+  }
+
+  private async warmUpSession(timeoutMs: number): Promise<void> {
+    const html = await this.fetchText(new URL("/", this.origin), timeoutMs);
+    if (isBlocked(html)) throw new Error("Vinted block/captcha detected");
   }
 
   private mapApiItem(item: VintedApiItem): EbayListingBase | null {
@@ -346,6 +363,11 @@ export function normalizeVintedItemUrl(href: string, origin: string): string {
 
 function isAuthError(error: unknown): boolean {
   return error instanceof Error && /Vinted HTTP 401/i.test(error.message);
+}
+
+export function isVintedBlockError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Vinted HTTP (403|429)|block|captcha|access denied|zugriff verweigert|forbidden|interdit|repeated block signals/i.test(message);
 }
 
 function splitSetCookie(value: string): string[] {

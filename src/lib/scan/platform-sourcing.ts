@@ -14,7 +14,7 @@ import { classifyListingCondition, isLikelyAccessoryOrDocumentation } from "@/li
 import { modelCodeMatches, modelTitleMatches } from "@/lib/model-match";
 import { createRun } from "@/lib/scan/catalog-sync";
 import { KleinanzeigenSearchClient } from "@/lib/sources/kleinanzeigen";
-import { VintedSearchClient } from "@/lib/sources/vinted";
+import { isVintedBlockError, VintedSearchClient } from "@/lib/sources/vinted";
 import { WallapopSearchClient } from "@/lib/sources/wallapop";
 import type { EbayListingBase, PlatformSourcingPlatform, RepairCandidate, ScanRun, ScanRunType, SourcePlatform, WalkmanModel } from "@/lib/types";
 
@@ -105,10 +105,11 @@ async function runPlatformSourcingScan(
           }
         }
         consecutiveBlocks = 0;
-        options.onProgress?.(`[${source}] ${offset + index + 1} ${model.name}: found=${candidates.length}`);
+        options.onProgress?.(`[${source}] ${offset + index + 1} ${model.name}: raw=${listings.length} kept=${candidates.length}`);
         await randomDelay(envPrefix);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const blocked = isBlockError(message);
         run.errors.push({ scope: model.name, message });
         if (shouldPersist) {
           await upsertPlatformScanResult({
@@ -124,9 +125,14 @@ async function runPlatformSourcingScan(
           });
         }
         options.onProgress?.(`[${source}] ${model.name}: ${message}`);
-        if (isBlockError(message)) consecutiveBlocks += 1;
-        if (consecutiveBlocks >= Number(process.env[`${envPrefix}_MAX_BLOCK_ERRORS`] || 3)) {
-          throw new Error(`${source} stopped after repeated block signals`);
+        if (blocked) {
+          consecutiveBlocks += 1;
+          if (consecutiveBlocks >= Number(process.env[`${envPrefix}_MAX_BLOCK_ERRORS`] || 3)) {
+            throw new Error(`${source} stopped after repeated block signals`);
+          }
+          await blockCooldown(source, envPrefix, consecutiveBlocks, options.onProgress);
+        } else {
+          consecutiveBlocks = 0;
         }
       }
     }
@@ -309,8 +315,30 @@ async function randomDelay(envPrefix: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delay));
 }
 
+async function blockCooldown(
+  source: PlatformSourcingPlatform,
+  envPrefix: string,
+  blockCount: number,
+  onProgress?: (event: string) => void
+): Promise<void> {
+  const defaultMinutes = source === "vinted" || source === "vinted_fr"
+    ? blockCount === 1 ? 15 : 45
+    : 0;
+  const namedKey = blockCount === 1 ? "FIRST" : "SECOND";
+  const minutes = Number(
+    process.env[`${envPrefix}_BLOCK_COOLDOWN_${namedKey}_MINUTES`]
+    || process.env.PLATFORM_BLOCK_COOLDOWN_MINUTES
+    || defaultMinutes
+  );
+  if (!Number.isFinite(minutes) || minutes <= 0) return;
+
+  onProgress?.(`[${source}] block cooldown ${minutes}m after ${blockCount} block signal(s)`);
+  await new Promise((resolve) => setTimeout(resolve, minutes * 60_000));
+}
+
 function isBlockError(message: string): boolean {
-  return /block|captcha|access denied|zugriff verweigert|forbidden|http 403|interdit/i.test(message);
+  return isVintedBlockError(message)
+    || /block|captcha|access denied|zugriff verweigert|forbidden|http 403|http 429|interdit/i.test(message);
 }
 
 function roundMoney(value: number): number {
